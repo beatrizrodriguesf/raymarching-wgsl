@@ -96,12 +96,61 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
     var all_objects_count = spheresCount + boxesCount + torusCount;
     var result = vec4f(vec3f(1.0), d);
 
+    var color = vec3f(0.0);
+
     for (var i = 0; i < all_objects_count; i = i + 1)
     {
       // get shape and shape order (shapesinfo)
+      var shapeinfo = shapesinfob[i];
+      var shapetype = shapeinfo[0];
+      var shapeindex = shapeinfo[1];
+
       // shapesinfo has the following format:
       // x: shape type (0: sphere, 1: box, 2: torus)
       // y: shape index
+
+      if (shapetype == 0) {
+        var sphere = shapesb[i32(shapeindex)];
+        var center = vec3f(sphere.transform[0], sphere.transform[1], sphere.transform[2]);
+        var p_transformed = p - center;
+
+        var d_object = sdf_sphere(p_transformed, sphere.radius, sphere.quat);
+
+        if (d_object < d) {
+          d = d_object;
+          color = vec3f(sphere.color[0], sphere.color[1], sphere.color[2]);
+        }
+      }
+
+      else if (shapetype == 1) {
+        var box = shapesb[i32(shapeindex)];
+        var quaternion = quaternion_from_euler(vec3f(box.rotation[0], box.rotation[1], box.rotation[2]));
+        var center = vec3f(box.transform[0], box.transform[1], box.transform[2]);
+        var size = vec3f(box.radius[0], box.radius[1], box.radius[2]);
+
+        var p_transformed = rotate_vector(p - center, quaternion);
+
+        var d_object = sdf_round_box(p_transformed, size, box.radius[3], box.quat);
+
+        if (d_object < d) {
+          d = d_object;
+          color = vec3f(box.color[0], box.color[1], box.color[2]);
+        }
+      }
+
+      else if (shapetype == 2) {
+        var torus = shapesb[i32(shapeindex)];
+        var center = vec3f(torus.transform[0], torus.transform[1], torus.transform[2]);
+        var p_transformed = p - center;
+
+        var d_object = sdf_torus(p_transformed, vec2f(torus.radius[0], torus.radius[1]), torus.quat);
+
+        if (d_object < d) {
+          d = d_object;
+          color = vec3f(torus.color[0], torus.color[1], torus.color[2]);
+        }
+      }
+
       // order matters for the operations, they're sorted on the CPU side
 
       // call transform_p and the sdf for the shape
@@ -114,6 +163,7 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
       // w: repeat offset
     }
 
+    result = vec4f(color, d);
     return result;
 }
 
@@ -125,12 +175,23 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
   var depth = 0.0;
   var color = vec3f(0.0);
   var march_step = uniforms[22];
+  var p = ro;
   
   for (var i = 0; i < max_marching_steps; i = i + 1)
   {
       // raymarch algorithm
       // call scene function and march
+      var result = scene(p);
+      depth += result[3];
+      p = ro + depth*rd;
+
       // if the depth is greater than the max distance or the distance is less than the epsilon, break
+      if (result[3] < EPSILON) {
+        color = vec3f(result[0], result[1], result[2]);
+      }
+      else if (depth > MAX_DIST) {
+        break;
+      }
   }
 
   return march_output(color, depth, false);
@@ -193,13 +254,14 @@ fn get_light(current: vec3f, obj_color: vec3f, rd: vec3f) -> vec3f
     return ambient;
   }
 
+  return obj_color;
   // calculate the light intensity
   // Use:
   // - shadow
   // - ambient occlusion (optional)
   // - ambient light
   // - object color
-  return ambient;
+  //return ambient;
 }
 
 fn set_camera(ro: vec3f, ta: vec3f, cr: f32) -> mat3x3<f32>
@@ -254,9 +316,11 @@ fn render(@builtin(global_invocation_id) id : vec3u)
   var rd = camera * normalize(vec3(uv, 1.0));
 
   // call march function and get the color/depth
+  var march_result = march(ro, rd);
   // move ray based on the depth
+  var p = ro + march_result.depth*rd;
   // get light
-  var color = vec3f(1.0);
+  var color = get_light(p, march_result.color, rd);
   
   // display the result
   color = linear_to_gamma(color);
