@@ -35,19 +35,28 @@ struct march_output {
 fn op_smooth_union(d1: f32, d2: f32, col1: vec3f, col2: vec3f, k: f32) -> vec4f
 {
   var k_eps = max(k, 0.0001);
-  return vec4f(col1, d1);
+  var h = clamp(0.5 + 0.5 * (d2 - d1) / k_eps, 0.0, 1.0);
+  var d = mix(d2, d1, h) - k_eps * h * (1.0 - h);
+  var col = mix(col2, col1, h);
+  return vec4f(col, d);
 }
 
 fn op_smooth_subtraction(d1: f32, d2: f32, col1: vec3f, col2: vec3f, k: f32) -> vec4f
 {
   var k_eps = max(k, 0.0001);
-  return vec4f(col1, d1);
+  var h = clamp(0.5 - 0.5 * (d2 + d1) / k_eps, 0.0, 1.0);
+  var d = mix(d2, -d1, h) + k_eps * h * (1.0 - h);
+  var col = mix(col2, col1, h);
+  return vec4f(col, d);
 }
 
 fn op_smooth_intersection(d1: f32, d2: f32, col1: vec3f, col2: vec3f, k: f32) -> vec4f
 {
   var k_eps = max(k, 0.0001);
-  return vec4f(col1, d1);
+  var h = clamp(0.5 - 0.5 * (d2 - d1) / k_eps, 0.0, 1.0);
+  var d = mix(d2, d1, h) + k_eps * h * (1.0 - h);
+  var col = mix(col2, col1, h);
+  return vec4f(col, d);
 }
 
 fn op(op: f32, d1: f32, d2: f32, col1: vec3f, col2: vec3f, k: f32) -> vec4f
@@ -119,9 +128,12 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
         var d_object = sdf_sphere(p_animation, sphere.radius, sphere.quat);
 
-        if (d_object < d) {
-          d = d_object;
-          color = vec3f(sphere.color[0], sphere.color[1], sphere.color[2]);
+        var result_op = op(sphere.op.x, d, d_object, color, sphere.color.xyz, sphere.op.y);
+        d = result_op.w;
+        color = result_op.xyz;
+
+        if (d_object < result.w) {
+          result = vec4f(color, d);
         }
       }
 
@@ -142,13 +154,17 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
         var size = vec3f(box.radius[0], box.radius[1], box.radius[2]);
 
-        var p_animation = rotate_vector(p - center, quaternion);
+        var p_transform = transform_p(p, box.op.zw);
+        var p_animation = rotate_vector(p_transform - center, quaternion);
 
         var d_object = sdf_round_box(p_animation, size, box.radius[3], box.quat);
 
-        if (d_object < d) {
-          d = d_object;
-          color = vec3f(box.color[0], box.color[1], box.color[2]);
+        var result_op = op(box.op.x, d, d_object, color, box.color.xyz, box.op.y);
+        d = result_op.w;
+        color = result_op.xyz;
+
+        if (d_object < result.w) {
+          result = vec4f(color, d);
         }
       }
 
@@ -167,13 +183,17 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
         var center = vec3f(centerx, centery, centerz);
 
-        var p_animation = rotate_vector(p - center, quaternion);
+        var p_transform = transform_p(p, torus.op.zw);
+        var p_animation = rotate_vector(p_transform - center, quaternion);
 
         var d_object = sdf_torus(p_animation, vec2f(torus.radius[0], torus.radius[1]), torus.quat);
 
-        if (d_object < d) {
-          d = d_object;
-          color = vec3f(torus.color[0], torus.color[1], torus.color[2]);
+        var result_op = op(torus.op.x, d, d_object, color, torus.color.xyz, torus.op.y);
+        d = result_op.w;
+        color = result_op.xyz;
+
+        if (d_object < result.w) {
+          result = vec4f(color, d);
         }
       }
 
@@ -202,6 +222,8 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
   var color = vec3f(1.0);
   var march_step = uniforms[22];
   var p = ro;
+  var outline_width = uniforms[27];
+  var outline = false;
   
   for (var i = 0; i < max_marching_steps; i = i + 1)
   {
@@ -213,7 +235,7 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
 
       // if the depth is greater than the max distance or the distance is less than the epsilon, break
       if (result[3] < EPSILON) {
-        color = vec3f(result[0], result[1], result[2]);
+        color = result.xyz;
         break;
       }
       else if (depth > MAX_DIST) {
@@ -221,7 +243,7 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
       }
   }
 
-  return march_output(color, depth, false);
+  return march_output(color, depth, outline);
 }
 
 fn get_normal(p: vec3f) -> vec3f
@@ -371,10 +393,12 @@ fn render(@builtin(global_invocation_id) id : vec3u)
 
   // call march function and get the color/depth
   var march_result = march(ro, rd);
+
   // move ray based on the depth
   var p = ro + march_result.depth*rd;
+  var color = vec3f(1.0);
   // get light
-  var color = get_light(p, march_result.color, rd);
+  color = get_light(p, march_result.color, rd);
   
   // display the result
   color = linear_to_gamma(color);
