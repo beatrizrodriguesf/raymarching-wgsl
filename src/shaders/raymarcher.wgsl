@@ -126,7 +126,7 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
       else if (shapetype == 1) {
         var box = shapesb[i32(shapeindex)];
 
-        var rotatex = box.rotation[0] + box.animate_rotation[0]*cos(box.animate_rotation[3]*time);
+        var rotatex = box.rotation[0] - box.animate_rotation[0]*cos(box.animate_rotation[3]*time);
         var rotatey = box.rotation[1] + box.animate_rotation[1]*sin(box.animate_rotation[3]*time);
         var rotatez = box.rotation[2] + box.animate_rotation[2]*sin(box.animate_rotation[3]*time);
 

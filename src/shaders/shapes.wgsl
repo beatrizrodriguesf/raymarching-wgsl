@@ -1,6 +1,6 @@
 fn sdf_round_box(p: vec3f, b: vec3f, r: f32, quat: vec4f) -> f32
 {
-  var q = abs(p) - b + r;
+  var q = abs(p) - b;
   return length(vec3f(max(q.x,0.0), max(q.y,0.0), max(q.z,0.0))) + min(max(q.x,max(q.y,q.z)),0.0) - r;
 }
 
