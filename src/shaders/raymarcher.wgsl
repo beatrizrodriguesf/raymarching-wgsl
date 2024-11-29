@@ -88,6 +88,7 @@ fn transform_p(p: vec3f, option: vec2f) -> vec3f
 fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 {
     var d = mix(100.0, p.y, uniforms[17]);
+    var time = uniforms[0];
 
     var spheresCount = i32(uniforms[2]);
     var boxesCount = i32(uniforms[3]);
@@ -100,18 +101,18 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
     for (var i = 0; i < all_objects_count; i = i + 1)
     {
-      // get shape and shape order (shapesinfo)
       var shapeinfo = shapesinfob[i];
-      var shapetype = shapeinfo[0];
-      var shapeindex = shapeinfo[1];
-
-      // shapesinfo has the following format:
-      // x: shape type (0: sphere, 1: box, 2: torus)
-      // y: shape index
+      var shapetype = shapeinfo[0]; // shape type (0: sphere, 1: box, 2: torus)
+      var shapeindex = shapeinfo[1]; // shape index
 
       if (shapetype == 0) {
         var sphere = shapesb[i32(shapeindex)];
-        var center = vec3f(sphere.transform[0], sphere.transform[1], sphere.transform[2]);
+
+        var centerx = sphere.transform[0] - sphere.animate_transform[0]*cos(sphere.animate_transform[3]*time);
+        var centery = sphere.transform[1] + sphere.animate_transform[1]*sin(sphere.animate_transform[3]*time);
+        var centerz = sphere.transform[2] + sphere.animate_transform[2]*sin(sphere.animate_transform[3]*time);
+
+        var center = vec3f(centerx, centery, centerz);
         var p_transformed = p - center;
 
         var d_object = sdf_sphere(p_transformed, sphere.radius, sphere.quat);
@@ -124,8 +125,19 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
       else if (shapetype == 1) {
         var box = shapesb[i32(shapeindex)];
-        var quaternion = quaternion_from_euler(vec3f(box.rotation[0], box.rotation[1], box.rotation[2]));
-        var center = vec3f(box.transform[0], box.transform[1], box.transform[2]);
+
+        var rotatex = box.rotation[0] + box.animate_rotation[0]*cos(box.animate_rotation[3]*time);
+        var rotatey = box.rotation[1] + box.animate_rotation[1]*sin(box.animate_rotation[3]*time);
+        var rotatez = box.rotation[2] + box.animate_rotation[2]*sin(box.animate_rotation[3]*time);
+
+        var quaternion = quaternion_from_euler(vec3f(rotatex, rotatey, rotatez));
+
+        var centerx = box.transform[0] + box.animate_transform[0]*sin(box.animate_transform[3]*time);
+        var centery = box.transform[1] + box.animate_transform[1]*sin(box.animate_transform[3]*time);
+        var centerz = box.transform[2] + box.animate_transform[2]*sin(box.animate_transform[3]*time);
+
+        var center = vec3f(centerx, centery, centerz);
+
         var size = vec3f(box.radius[0], box.radius[1], box.radius[2]);
 
         var p_transformed = rotate_vector(p - center, quaternion);
@@ -140,8 +152,20 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
       else if (shapetype == 2) {
         var torus = shapesb[i32(shapeindex)];
-        var center = vec3f(torus.transform[0], torus.transform[1], torus.transform[2]);
-        var p_transformed = p - center;
+
+        var rotatex = torus.rotation[0] - torus.animate_rotation[0]*cos(torus.animate_rotation[3]*time);
+        var rotatey = torus.rotation[1] + torus.animate_rotation[1]*sin(torus.animate_rotation[3]*time);
+        var rotatez = torus.rotation[2] + torus.animate_rotation[2]*sin(torus.animate_rotation[3]*time);
+
+        var quaternion = quaternion_from_euler(vec3f(rotatex, rotatey, rotatez));
+
+        var centerx = torus.transform[0] + torus.animate_transform[0]*sin(torus.animate_transform[3]*time);
+        var centery = torus.transform[1] + torus.animate_transform[1]*sin(torus.animate_transform[3]*time);
+        var centerz = torus.transform[2] + torus.animate_transform[2]*sin(torus.animate_transform[3]*time);
+
+        var center = vec3f(centerx, centery, centerz);
+
+        var p_transformed = rotate_vector(p - center, quaternion);
 
         var d_object = sdf_torus(p_transformed, vec2f(torus.radius[0], torus.radius[1]), torus.quat);
 
@@ -188,6 +212,7 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
       // if the depth is greater than the max distance or the distance is less than the epsilon, break
       if (result[3] < EPSILON) {
         color = vec3f(result[0], result[1], result[2]);
+        break;
       }
       else if (depth > MAX_DIST) {
         break;
@@ -199,7 +224,11 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
 
 fn get_normal(p: vec3f) -> vec3f
 {
-  return vec3f(0.0);
+  var df_x = scene(vec3f(p.x + 0.001, p.y, p.z))[3] - scene(vec3f(p.x - 0.001, p.y, p.z))[3];
+  var df_y = scene(vec3f(p.x, p.y + 0.001, p.z))[3] - scene(vec3f(p.x, p.y - 0.001, p.z))[3];
+  var df_z = scene(vec3f(p.x, p.y, p.z + 0.001))[3]- scene(vec3f(p.x, p.y, p.z - 0.001))[3];
+
+  return normalize(vec3f(df_x, df_y, df_z));
 }
 
 // https://iquilezles.org/articles/rmshadows/
@@ -248,14 +277,18 @@ fn get_light(current: vec3f, obj_color: vec3f, rd: vec3f) -> vec3f
   var normal = get_normal(current);
 
   // calculate light based on the normal
+  var light_dir = normalize(light_position - current);
+
   // if the object is too far away from the light source, return ambient light
-  if (length(current) > uniforms[20] + uniforms[8])
+  if (length(light_position - current) > uniforms[20] + uniforms[8])
   {
     return ambient;
   }
 
-  return obj_color;
   // calculate the light intensity
+  var light_intensity = max(dot(normal, light_dir), 0.0);
+
+  return sun_color*light_intensity*obj_color;
   // Use:
   // - shadow
   // - ambient occlusion (optional)
