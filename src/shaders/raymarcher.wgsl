@@ -70,7 +70,7 @@ fn op(op: f32, d1: f32, d2: f32, col1: vec3f, col2: vec3f, k: f32) -> vec4f
 
 fn repeat(p: vec3f, offset: vec3f) -> vec3f
 {
-  return vec3f(0.0);
+    return p - offset * floor((p + 0.5 * offset) / offset);
 }
 
 fn transform_p(p: vec3f, option: vec2f) -> vec3f
@@ -97,7 +97,7 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
     var all_objects_count = spheresCount + boxesCount + torusCount;
     var result = vec4f(vec3f(1.0), d);
 
-    var color = vec3f(0.0);
+    var color = vec3f(1.0);
 
     for (var i = 0; i < all_objects_count; i = i + 1)
     {
@@ -113,9 +113,11 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
         var centerz = sphere.transform[2] + sphere.animate_transform[2]*sin(sphere.animate_transform[3]*time);
 
         var center = vec3f(centerx, centery, centerz);
-        var p_transformed = p - center;
 
-        var d_object = sdf_sphere(p_transformed, sphere.radius, sphere.quat);
+        var p_transform = transform_p(p, sphere.op.zw);
+        var p_animation = p_transform - center;
+
+        var d_object = sdf_sphere(p_animation, sphere.radius, sphere.quat);
 
         if (d_object < d) {
           d = d_object;
@@ -140,9 +142,9 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
         var size = vec3f(box.radius[0], box.radius[1], box.radius[2]);
 
-        var p_transformed = rotate_vector(p - center, quaternion);
+        var p_animation = rotate_vector(p - center, quaternion);
 
-        var d_object = sdf_round_box(p_transformed, size, box.radius[3], box.quat);
+        var d_object = sdf_round_box(p_animation, size, box.radius[3], box.quat);
 
         if (d_object < d) {
           d = d_object;
@@ -165,9 +167,9 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
 
         var center = vec3f(centerx, centery, centerz);
 
-        var p_transformed = rotate_vector(p - center, quaternion);
+        var p_animation = rotate_vector(p - center, quaternion);
 
-        var d_object = sdf_torus(p_transformed, vec2f(torus.radius[0], torus.radius[1]), torus.quat);
+        var d_object = sdf_torus(p_animation, vec2f(torus.radius[0], torus.radius[1]), torus.quat);
 
         if (d_object < d) {
           d = d_object;
@@ -197,7 +199,7 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
   var EPSILON = uniforms[23];
 
   var depth = 0.0;
-  var color = vec3f(0.0);
+  var color = vec3f(1.0);
   var march_step = uniforms[22];
   var p = ro;
   
@@ -234,7 +236,27 @@ fn get_normal(p: vec3f) -> vec3f
 // https://iquilezles.org/articles/rmshadows/
 fn get_soft_shadow(ro: vec3f, rd: vec3f, tmin: f32, tmax: f32, k: f32) -> f32
 {
-  return 0.0;
+  var t = tmin;  // distância mínima
+  var shadow = 1.0;
+
+  for (var i = 0; i < 50; i = i + 1) { // número de passos
+      var p = ro + t * rd;
+      var d = scene(p).w; // Distância do objeto mais próximo
+
+      if (d < 0.001) { // Raio atingiu um objeto
+          return 0.0;
+      }
+
+      // Atualiza o fator de sombra com base na distância e suavização
+      shadow = min(shadow, k * d / t);
+      t += d;
+
+      if (t > tmax) {
+          break;
+      }
+    }
+
+    return shadow;
 }
 
 fn get_AO(current: vec3f, normal: vec3f) -> f32
@@ -278,23 +300,22 @@ fn get_light(current: vec3f, obj_color: vec3f, rd: vec3f) -> vec3f
 
   // calculate light based on the normal
   var light_dir = normalize(light_position - current);
+  var light_distance = length(current - light_position);
 
   // if the object is too far away from the light source, return ambient light
-  if (length(light_position - current) > uniforms[20] + uniforms[8])
+  if (light_distance > uniforms[20] + uniforms[8])
   {
     return ambient;
   }
 
-  // calculate the light intensity
-  var light_intensity = max(dot(normal, light_dir), 0.0);
+  // Light intensity
+  var shadow = get_soft_shadow(current, light_dir, 0.01, light_distance, 8.0); // shadow
+  var direct_light = shadow * max(dot(normal, light_dir), 0.0);
 
-  return sun_color*light_intensity*obj_color;
-  // Use:
-  // - shadow
-  // - ambient occlusion (optional)
-  // - ambient light
-  // - object color
-  //return ambient;
+  var ambient_occlusion = get_AO(current, normal); // ambient occlusion
+  var ambient_light = ambient*ambient_occlusion; // ambient light
+
+  return (direct_light + ambient_light)*obj_color;
 }
 
 fn set_camera(ro: vec3f, ta: vec3f, cr: f32) -> mat3x3<f32>
