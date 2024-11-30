@@ -118,8 +118,8 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
         var sphere = shapesb[i32(shapeindex)];
 
         var centerx = sphere.transform[0] - sphere.animate_transform[0]*cos(sphere.animate_transform[3]*time);
-        var centery = sphere.transform[1] + sphere.animate_transform[1]*sin(sphere.animate_transform[3]*time);
-        var centerz = sphere.transform[2] + sphere.animate_transform[2]*sin(sphere.animate_transform[3]*time);
+        var centery = sphere.transform[1] - sphere.animate_transform[1]*sin(sphere.animate_transform[3]*time);
+        var centerz = sphere.transform[2] - sphere.animate_transform[2]*sin(sphere.animate_transform[3]*time);
 
         var center = vec3f(centerx, centery, centerz);
 
@@ -141,14 +141,14 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
         var box = shapesb[i32(shapeindex)];
 
         var rotatex = box.rotation[0] - box.animate_rotation[0]*cos(box.animate_rotation[3]*time);
-        var rotatey = box.rotation[1] + box.animate_rotation[1]*sin(box.animate_rotation[3]*time);
-        var rotatez = box.rotation[2] + box.animate_rotation[2]*sin(box.animate_rotation[3]*time);
+        var rotatey = box.rotation[1] - box.animate_rotation[1]*sin(box.animate_rotation[3]*time);
+        var rotatez = box.rotation[2] - box.animate_rotation[2]*sin(box.animate_rotation[3]*time);
 
         var quaternion = quaternion_from_euler(vec3f(rotatex, rotatey, rotatez));
 
-        var centerx = box.transform[0] + box.animate_transform[0]*sin(box.animate_transform[3]*time);
-        var centery = box.transform[1] + box.animate_transform[1]*sin(box.animate_transform[3]*time);
-        var centerz = box.transform[2] + box.animate_transform[2]*sin(box.animate_transform[3]*time);
+        var centerx = box.transform[0] - box.animate_transform[0]*sin(box.animate_transform[3]*time);
+        var centery = box.transform[1] - box.animate_transform[1]*sin(box.animate_transform[3]*time);
+        var centerz = box.transform[2] - box.animate_transform[2]*sin(box.animate_transform[3]*time);
 
         var center = vec3f(centerx, centery, centerz);
 
@@ -172,14 +172,14 @@ fn scene(p: vec3f) -> vec4f // xyz = color, w = distance
         var torus = shapesb[i32(shapeindex)];
 
         var rotatex = torus.rotation[0] - torus.animate_rotation[0]*cos(torus.animate_rotation[3]*time);
-        var rotatey = torus.rotation[1] + torus.animate_rotation[1]*sin(torus.animate_rotation[3]*time);
-        var rotatez = torus.rotation[2] + torus.animate_rotation[2]*sin(torus.animate_rotation[3]*time);
+        var rotatey = torus.rotation[1] - torus.animate_rotation[1]*sin(torus.animate_rotation[3]*time);
+        var rotatez = torus.rotation[2] - torus.animate_rotation[2]*sin(torus.animate_rotation[3]*time);
 
         var quaternion = quaternion_from_euler(vec3f(rotatex, rotatey, rotatez));
 
-        var centerx = torus.transform[0] + torus.animate_transform[0]*sin(torus.animate_transform[3]*time);
-        var centery = torus.transform[1] + torus.animate_transform[1]*sin(torus.animate_transform[3]*time);
-        var centerz = torus.transform[2] + torus.animate_transform[2]*sin(torus.animate_transform[3]*time);
+        var centerx = torus.transform[0] - torus.animate_transform[0]*sin(torus.animate_transform[3]*time);
+        var centery = torus.transform[1] - torus.animate_transform[1]*sin(torus.animate_transform[3]*time);
+        var centerz = torus.transform[2] - torus.animate_transform[2]*sin(torus.animate_transform[3]*time);
 
         var center = vec3f(centerx, centery, centerz);
 
@@ -222,7 +222,6 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
   var color = vec3f(1.0);
   var march_step = uniforms[22];
   var p = ro;
-  var outline_width = uniforms[27];
   var outline = false;
   
   for (var i = 0; i < max_marching_steps; i = i + 1)
@@ -237,6 +236,11 @@ fn march(ro: vec3f, rd: vec3f) -> march_output
       if (result[3] < EPSILON) {
         color = result.xyz;
         break;
+      }
+      if (result[3] < uniforms[27] && uniforms[26] == 1.0) {
+        if (dot(get_normal(p),rd) < 0.03 && dot(get_normal(p),rd) > -0.03) {
+          outline = true;
+        }
       }
       else if (depth > MAX_DIST) {
         break;
@@ -397,8 +401,11 @@ fn render(@builtin(global_invocation_id) id : vec3u)
   // move ray based on the depth
   var p = ro + march_result.depth*rd;
   var color = vec3f(1.0);
+
   // get light
-  color = get_light(p, march_result.color, rd);
+  if (!march_result.outline) {
+    color = get_light(p, march_result.color, rd);
+  }
   
   // display the result
   color = linear_to_gamma(color);
